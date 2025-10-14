@@ -47,5 +47,5 @@ logs/
 ### Environment ###
 .env
 .env.local
-.env.production
 .env.*.local
+# Note: .env.production is a template and should be committed
