@@ -29,13 +29,6 @@ pipeline {
             }
         }
 
-        stage('Prepare Deployment') {
-            steps {
-                echo 'Preparing deployment scripts...'
-                sh 'chmod +x deploy-remote.sh'
-            }
-        }
-
         stage('Deploy to Server') {
             steps {
                 echo "Deploying to ${params.SERVER_HOST}..."
