@@ -24,8 +24,12 @@ pipeline {
         stage('Checkout') {
             steps {
                 echo "Checking out branch: ${params.BRANCH}"
-                git branch: "${params.BRANCH}",
-                    url: 'https://github.com/369855707/Matera.git'
+                retry(3) {
+                    timeout(time: 10, unit: 'MINUTES') {
+                        git branch: "${params.BRANCH}",
+                            url: 'https://github.com/369855707/Matera.git'
+                    }
+                }
             }
         }
 
