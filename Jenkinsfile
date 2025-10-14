@@ -2,10 +2,10 @@ pipeline {
     agent any
 
     parameters {
-        choice(
+        string(
             name: 'BRANCH',
-            choices: ['main', 'feat/deployment-setup', 'develop'],
-            description: 'Select branch to deploy'
+            defaultValue: 'main',
+            description: 'Branch name to deploy (e.g., main, develop, feature/xxx)'
         )
         string(
             name: 'SERVER_HOST',
@@ -24,15 +24,12 @@ pipeline {
         stage('Checkout') {
             steps {
                 echo "Checking out branch: ${params.BRANCH}"
-                git branch: "${params.BRANCH}",
-                    url: 'https://github.com/369855707/Matera.git'
-            }
-        }
-
-        stage('Prepare Deployment') {
-            steps {
-                echo 'Preparing deployment scripts...'
-                sh 'chmod +x deploy-remote.sh'
+                retry(3) {
+                    timeout(time: 10, unit: 'MINUTES') {
+                        git branch: "${params.BRANCH}",
+                            url: 'https://github.com/369855707/Matera.git'
+                    }
+                }
             }
         }
 
