@@ -2,10 +2,10 @@ pipeline {
     agent any
 
     parameters {
-        choice(
+        string(
             name: 'BRANCH',
-            choices: ['main', 'feat/deployment-setup', 'develop'],
-            description: 'Select branch to deploy'
+            defaultValue: 'main',
+            description: 'Branch name to deploy (e.g., main, develop, feature/xxx)'
         )
         string(
             name: 'SERVER_HOST',
