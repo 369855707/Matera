@@ -1,7 +1,8 @@
 # ========================================
 # Stage 1: Build Stage
 # ========================================
-FROM maven:3.9.3-eclipse-temurin-17-focal AS builder
+# Using openjdk variant for better China registry compatibility
+FROM maven:3.9-openjdk-17-slim AS builder
 
 WORKDIR /build
 
@@ -22,7 +23,8 @@ RUN mvn clean package -DskipTests -B -s /root/.m2/settings.xml
 # ========================================
 # Stage 2: Runtime Stage
 # ========================================
-FROM eclipse-temurin:17-jre-focal
+# Using openjdk variant for better China registry compatibility
+FROM openjdk:17-jre-slim
 
 # Install curl for health checks
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*

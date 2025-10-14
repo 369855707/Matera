@@ -20,28 +20,124 @@ echo -e "${BLUE}Maternity Backend - Server Setup${NC}"
 echo -e "${BLUE}=========================================${NC}"
 echo ""
 
+# Step 0: Check and install Git
+echo -e "${GREEN}Step 0: Checking Git installation...${NC}"
+if ! command -v git &> /dev/null; then
+    echo -e "${YELLOW}Git not found. Installing Git...${NC}"
+    yum install -y git
+    echo -e "${GREEN}✓ Git installed successfully${NC}"
+else
+    echo -e "${GREEN}✓ Git already installed: $(git --version)${NC}"
+fi
+
 # Step 1: Check and install Docker
 echo -e "${GREEN}Step 1: Checking Docker installation...${NC}"
 if ! command -v docker &> /dev/null; then
-    echo -e "${YELLOW}Docker not found. Installing Docker...${NC}"
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sh get-docker.sh
-    rm get-docker.sh
-    echo -e "${GREEN}✓ Docker installed successfully${NC}"
+    echo -e "${YELLOW}Docker not found. Installing Docker for TencentOS/CentOS...${NC}"
+
+    # Remove old versions
+    yum remove -y docker docker-client docker-client-latest docker-common docker-latest docker-latest-logrotate docker-logrotate docker-engine 2>/dev/null || true
+
+    # Install required packages
+    yum install -y yum-utils device-mapper-persistent-data lvm2
+
+    # Add Aliyun Docker repository
+    yum-config-manager --add-repo https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
+
+    # Install Docker
+    yum install -y docker-ce docker-ce-cli containerd.io
+
+    # Configure Docker registry mirrors for China
+    echo -e "${YELLOW}Configuring Docker registry mirrors for China...${NC}"
+    mkdir -p /etc/docker
+    cat > /etc/docker/daemon.json << 'DOCKER_EOF'
+{
+  "registry-mirrors": [
+    "https://docker.mirrors.ustc.edu.cn",
+    "https://mirror.ccs.tencentyun.com",
+    "https://registry.docker-cn.com"
+  ],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+DOCKER_EOF
+
+    # Start and enable Docker
+    systemctl start docker
+    systemctl enable docker
+
+    echo -e "${GREEN}✓ Docker installed successfully with registry mirrors${NC}"
 else
     echo -e "${GREEN}✓ Docker already installed: $(docker --version)${NC}"
+
+    # Check if registry mirrors are configured
+    if [ ! -f /etc/docker/daemon.json ] || ! grep -q "registry-mirrors" /etc/docker/daemon.json 2>/dev/null; then
+        echo -e "${YELLOW}Configuring Docker registry mirrors for China...${NC}"
+        mkdir -p /etc/docker
+        cat > /etc/docker/daemon.json << 'DOCKER_EOF'
+{
+  "registry-mirrors": [
+    "https://docker.mirrors.ustc.edu.cn",
+    "https://mirror.ccs.tencentyun.com",
+    "https://registry.docker-cn.com"
+  ],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+DOCKER_EOF
+        systemctl restart docker
+        echo -e "${GREEN}✓ Docker registry mirrors configured${NC}"
+    else
+        echo -e "${GREEN}✓ Docker registry mirrors already configured${NC}"
+    fi
 fi
 
 # Step 2: Check and install Docker Compose
 echo ""
 echo -e "${GREEN}Step 2: Checking Docker Compose installation...${NC}"
-if ! command -v docker-compose &> /dev/null; then
+if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
     echo -e "${YELLOW}Docker Compose not found. Installing...${NC}"
-    curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-    chmod +x /usr/local/bin/docker-compose
-    echo -e "${GREEN}✓ Docker Compose installed successfully${NC}"
+
+    # Try installing docker-compose-plugin via yum (recommended method)
+    echo -e "${YELLOW}Trying to install docker-compose-plugin...${NC}"
+    yum install -y docker-compose-plugin 2>/dev/null || true
+
+    # Check if docker compose plugin works
+    if docker compose version &> /dev/null; then
+        echo -e "${GREEN}✓ Docker Compose plugin installed successfully${NC}"
+        # Create docker-compose alias
+        echo 'alias docker-compose="docker compose"' >> ~/.bashrc
+        ln -sf /usr/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose 2>/dev/null || true
+    else
+        # Fallback: try downloading binary
+        echo -e "${YELLOW}Trying to download Docker Compose binary...${NC}"
+        COMPOSE_VERSION="v2.24.0"
+
+        # Try DaoCloud mirror (usually more reliable in China)
+        curl -L "https://get.daocloud.io/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose 2>/dev/null || \
+        curl -kL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose 2>/dev/null || true
+
+        if [ -f /usr/local/bin/docker-compose ] && [ -s /usr/local/bin/docker-compose ]; then
+            chmod +x /usr/local/bin/docker-compose
+            echo -e "${GREEN}✓ Docker Compose binary installed successfully${NC}"
+        else
+            echo -e "${RED}Failed to install Docker Compose. Will try to use 'docker compose' command instead.${NC}"
+        fi
+    fi
 else
-    echo -e "${GREEN}✓ Docker Compose already installed: $(docker-compose --version)${NC}"
+    if command -v docker-compose &> /dev/null; then
+        echo -e "${GREEN}✓ Docker Compose already installed: $(docker-compose --version)${NC}"
+    else
+        echo -e "${GREEN}✓ Docker Compose plugin already installed: $(docker compose version)${NC}"
+        # Create alias for convenience
+        ln -sf /usr/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose 2>/dev/null || true
+    fi
 fi
 
 # Step 3: Clone or update repository
