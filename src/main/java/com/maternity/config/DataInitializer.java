@@ -8,7 +8,6 @@ import com.maternity.repository.OrderRepository;
 import com.maternity.repository.ReviewRepository;
 import com.maternity.repository.UserRepository;
 import org.springframework.boot.CommandLineRunner;
-import org.springframework.context.annotation.Profile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
@@ -16,7 +15,6 @@ import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.List;
 
-@Profile("dev")
 @Component
 public class DataInitializer implements CommandLineRunner {
 
@@ -45,6 +43,13 @@ public class DataInitializer implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
+        // Check if database is already initialized
+        if (adminRepository.count() > 0) {
+            log.info("Database already initialized (found {} admin users), skipping data initialization",
+                adminRepository.count());
+            return;
+        }
+
         log.info("Initializing database with sample data...");
 
         // Create admin users
