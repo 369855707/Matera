@@ -2,7 +2,7 @@
 # Stage 1: Build Stage
 # ========================================
 # Using openjdk variant for better China registry compatibility
-FROM maven:3.9-openjdk-17-slim AS builder
+FROM eclipse-temurin:21 AS builder
 
 WORKDIR /build
 
@@ -24,7 +24,7 @@ RUN mvn clean package -DskipTests -B -s /root/.m2/settings.xml
 # Stage 2: Runtime Stage
 # ========================================
 # Using openjdk variant for better China registry compatibility
-FROM openjdk:17-jre-slim
+FROM eclipse-temurin:21-jre
 
 # Install curl for health checks
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*

@@ -30,75 +30,91 @@ pipeline {
                             url: 'https://github.com/369855707/Matera.git'
                     }
                 }
+                echo "✓ Checkout completed successfully"
             }
         }
 
-        stage('2. Build Docker Image') {
+        stage('2. Transfer Source Code to Server') {
             steps {
-                echo "Building Docker image locally in Jenkins..."
-                sh """
-                    set -e
-
-                    # Ensure Docker is in PATH
-                    export PATH="/usr/local/bin:\$PATH"
-
-                    echo "========================================="
-                    echo "Building Docker image..."
-                    echo "========================================="
-
-                    # Build Docker image with tag
-                    docker build -t maternity-backend:${BUILD_NUMBER} .
-                    
-                    # Also tag as latest
-                    docker tag maternity-backend:${BUILD_NUMBER} maternity-backend:latest
-                    
-                    # Show image info
-                    docker images | grep maternity-backend
-                    
-                    echo "✓ Docker image built successfully!"
-                """
-            }
-        }
-
-        stage('3. Save and Transfer Image') {
-            steps {
-                echo "Saving and transferring Docker image to ${params.SERVER_HOST}..."
-                sh """
-                    set -e
-
-                    # Ensure Docker is in PATH
-                    export PATH="/usr/local/bin:\$PATH"
-
-                    echo "========================================="
-                    echo "Saving Docker image..."
-                    echo "========================================="
-
-                    # Save Docker image to tar file
-                    docker save maternity-backend:${BUILD_NUMBER} -o maternity-backend-${BUILD_NUMBER}.tar
-
-                    echo "✓ Docker image saved"
-                """
-
+                echo "Transferring source code to ${params.SERVER_HOST}..."
                 sshagent(credentials: ['tencent-server-ssh']) {
                     sh """
                         set -e
                         echo "========================================="
-                        echo "Transferring image to server..."
+                        echo "Preparing deployment directory..."
                         echo "========================================="
 
-                        # Transfer tar file to server via SCP
-                        scp -o StrictHostKeyChecking=no \
-                            maternity-backend-${BUILD_NUMBER}.tar \
-                            root@${params.SERVER_HOST}:${DEPLOY_PATH}/
+                        # Create deployment directory if it doesn't exist
+                        ssh -o StrictHostKeyChecking=no root@${params.SERVER_HOST} "
+                            mkdir -p ${DEPLOY_PATH}
+                            echo '✓ Deployment directory ready'
+                        "
 
-                        echo "✓ Image transferred successfully"
+                        echo "========================================="
+                        echo "Transferring source code..."
+                        echo "========================================="
+
+                        # Use rsync to transfer source code efficiently
+                        rsync -avz --delete \
+                            --exclude '.git' \
+                            --exclude 'node_modules' \
+                            --exclude 'target' \
+                            --exclude '.gradle' \
+                            --exclude 'build' \
+                            -e "ssh -o StrictHostKeyChecking=no" \
+                            ./ root@${params.SERVER_HOST}:${DEPLOY_PATH}/
+
+                        echo "✓ Source code transferred successfully"
+
+                        # Verify transfer
+                        ssh -o StrictHostKeyChecking=no root@${params.SERVER_HOST} "
+                            echo 'Verifying transferred files...'
+                            ls -la ${DEPLOY_PATH}/ | head -20
+                            if [ -f ${DEPLOY_PATH}/Dockerfile ]; then
+                                echo '✓ Verification passed: Dockerfile found'
+                            else
+                                echo '✗ Verification failed: Dockerfile not found'
+                                exit 1
+                            fi
+                        "
                     """
                 }
+            }
+        }
 
-                sh """
-                    # Cleanup local tar file
-                    rm maternity-backend-${BUILD_NUMBER}.tar
-                """
+        stage('3. Build Docker Image on Server') {
+            steps {
+                echo "Building Docker image on ${params.SERVER_HOST}..."
+                sshagent(credentials: ['tencent-server-ssh']) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no root@${params.SERVER_HOST} '
+                            set -e
+                            echo "========================================="
+                            echo "Building Docker image on server..."
+                            echo "========================================="
+
+                            cd ${DEPLOY_PATH}
+
+                            # Build Docker image with tag
+                            docker build -t maternity-backend:${BUILD_NUMBER} .
+
+                            # Also tag as latest
+                            docker tag maternity-backend:${BUILD_NUMBER} maternity-backend:latest
+
+                            echo ""
+                            echo "Verifying built image..."
+                            docker images | grep maternity-backend
+
+                            # Verify image was created successfully
+                            if docker images | grep -q "maternity-backend.*${BUILD_NUMBER}"; then
+                                echo "✓ Docker image built successfully!"
+                            else
+                                echo "✗ Docker image build failed!"
+                                exit 1
+                            fi
+                        '
+                    """
+                }
             }
         }
 
@@ -112,13 +128,26 @@ pipeline {
                             echo "========================================="
                             echo "Stopping existing containers..."
                             echo "========================================="
-                            
+
                             cd ${DEPLOY_PATH}
-                            
-                            # Stop and remove containers
-                            docker-compose down || true
-                            
-                            echo "✓ Old containers stopped"
+
+                            # Check if containers are running
+                            if docker-compose ps | grep -q "Up"; then
+                                echo "Found running containers, stopping them..."
+                                docker-compose down
+                            else
+                                echo "No running containers found"
+                                docker-compose down || true
+                            fi
+
+                            # Verify containers are stopped
+                            if docker-compose ps | grep -q "Up"; then
+                                echo "✗ Failed to stop containers!"
+                                docker-compose ps
+                                exit 1
+                            else
+                                echo "✓ Old containers stopped successfully"
+                            fi
                         '
                     """
                 }
@@ -133,35 +162,39 @@ pipeline {
                         ssh -o StrictHostKeyChecking=no root@${params.SERVER_HOST} '
                             set -e
                             echo "========================================="
-                            echo "Loading Docker image..."
+                            echo "Updating docker-compose configuration..."
                             echo "========================================="
-                            
+
                             cd ${DEPLOY_PATH}
-                            
-                            # Load the transferred Docker image
-                            docker load -i maternity-backend-${BUILD_NUMBER}.tar
-                            
-                            echo "✓ Docker image loaded"
-                            
+
                             # Update docker-compose.yml to use the new image
-                            # Assuming docker-compose.yml uses 'maternity-backend:latest'
-                            sed -i \"s|maternity-backend:.*|maternity-backend:${BUILD_NUMBER}|g\" docker-compose.yml
-                            
+                            sed -i "s|maternity-backend:.*|maternity-backend:${BUILD_NUMBER}|g" docker-compose.yml
+
+                            echo "Configuration updated to use maternity-backend:${BUILD_NUMBER}"
+
                             echo "========================================="
                             echo "Starting new containers..."
                             echo "========================================="
-                            
+
                             # Start containers
                             docker-compose up -d
-                            
-                            echo "✓ New containers started"
-                            
-                            # Wait for application to start
+
+                            echo ""
                             echo "Waiting for application to initialize..."
                             sleep 15
-                            
-                            # Cleanup tar file
-                            rm maternity-backend-${BUILD_NUMBER}.tar
+
+                            # Verify containers are running
+                            echo ""
+                            echo "Verifying container status..."
+                            docker-compose ps
+
+                            if docker-compose ps | grep -q "Up"; then
+                                echo "✓ New containers started successfully"
+                            else
+                                echo "✗ Containers failed to start!"
+                                docker-compose logs --tail=50
+                                exit 1
+                            fi
                         '
                     """
                 }
@@ -178,37 +211,37 @@ pipeline {
                             echo "========================================="
                             echo "Verifying deployment..."
                             echo "========================================="
-                            
+
                             cd ${DEPLOY_PATH}
-                            
+
                             # Check container status
                             echo ""
                             echo "Container status:"
                             docker-compose ps
-                            
+
                             # Check running image version
                             echo ""
                             echo "Running image version:"
-                            docker inspect --format=\"{{.Config.Image}}\" \$(docker-compose ps -q maternity-backend) || echo "Container not found"
-                            
+                            docker inspect --format="{{.Config.Image}}" \$(docker-compose ps -q maternity-backend) || echo "Container not found"
+
                             # Perform health check
                             echo ""
                             echo "Checking application health..."
                             for i in {1..12}; do
                                 if curl -f http://localhost:8080/actuator/health -s > /dev/null; then
                                     echo "✓ Application is healthy!"
-                                    
+
                                     # Get additional info
                                     echo ""
                                     echo "Application Info:"
-                                    curl -s http://localhost:8080/actuator/health | grep -o \"\\\"status\\\":\\\"[^\\\"]*\\\"\"
-                                    
+                                    curl -s http://localhost:8080/actuator/health | grep -o "\\\"status\\\":\\\"[^\\\"]*\\\""
+
                                     exit 0
                                 fi
                                 echo "Waiting for application... (\$i/12)"
                                 sleep 5
                             done
-                            
+
                             echo "✗ Health check failed!"
                             docker-compose logs --tail=50
                             exit 1
