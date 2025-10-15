@@ -38,10 +38,14 @@ pipeline {
                 echo "Building Docker image locally in Jenkins..."
                 sh """
                     set -e
+
+                    # Ensure Docker is in PATH
+                    export PATH="/usr/local/bin:\$PATH"
+
                     echo "========================================="
                     echo "Building Docker image..."
                     echo "========================================="
-                    
+
                     # Build Docker image with tag
                     docker build -t maternity-backend:${BUILD_NUMBER} .
                     
@@ -61,25 +65,37 @@ pipeline {
                 echo "Saving and transferring Docker image to ${params.SERVER_HOST}..."
                 sh """
                     set -e
+
+                    # Ensure Docker is in PATH
+                    export PATH="/usr/local/bin:\$PATH"
+
                     echo "========================================="
                     echo "Saving Docker image..."
                     echo "========================================="
-                    
+
                     # Save Docker image to tar file
                     docker save maternity-backend:${BUILD_NUMBER} -o maternity-backend-${BUILD_NUMBER}.tar
-                    
+
                     echo "✓ Docker image saved"
-                    echo "========================================="
-                    echo "Transferring image to server..."
-                    echo "========================================="
-                    
-                    # Transfer tar file to server via SCP
-                    scp -o StrictHostKeyChecking=no \
-                        maternity-backend-${BUILD_NUMBER}.tar \
-                        root@${params.SERVER_HOST}:${DEPLOY_PATH}/
-                    
-                    echo "✓ Image transferred successfully"
-                    
+                """
+
+                sshagent(credentials: ['tencent-server-ssh']) {
+                    sh """
+                        set -e
+                        echo "========================================="
+                        echo "Transferring image to server..."
+                        echo "========================================="
+
+                        # Transfer tar file to server via SCP
+                        scp -o StrictHostKeyChecking=no \
+                            maternity-backend-${BUILD_NUMBER}.tar \
+                            root@${params.SERVER_HOST}:${DEPLOY_PATH}/
+
+                        echo "✓ Image transferred successfully"
+                    """
+                }
+
+                sh """
                     # Cleanup local tar file
                     rm maternity-backend-${BUILD_NUMBER}.tar
                 """
