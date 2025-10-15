@@ -18,118 +18,70 @@ pipeline {
         PROJECT_NAME = 'maternity-backend'
         DEPLOY_PATH = '/opt/maternity-backend'
         DOCKER_COMPOSE_FILE = 'docker-compose.yml'
+        GIT_REPO = 'https://github.com/369855707/Matera.git'
     }
 
     stages {
-        stage('1. Checkout') {
+        stage('Deploy to Server') {
             steps {
-                echo "Checking out branch: ${params.BRANCH}"
-                retry(3) {
-                    timeout(time: 10, unit: 'MINUTES') {
-                        git branch: "${params.BRANCH}",
-                            url: 'https://github.com/369855707/Matera.git'
-                    }
-                }
-                echo "✓ Checkout completed successfully"
-            }
-        }
-
-        stage('2. Transfer Source Code to Server') {
-            steps {
-                echo "Transferring source code to ${params.SERVER_HOST}..."
-                sshagent(credentials: ['tencent-server-ssh']) {
-                    sh """
-                        set -e
-                        echo "========================================="
-                        echo "Preparing deployment directory..."
-                        echo "========================================="
-
-                        # Create deployment directory if it doesn't exist
-                        ssh -o StrictHostKeyChecking=no root@${params.SERVER_HOST} "
-                            mkdir -p ${DEPLOY_PATH}
-                            echo '✓ Deployment directory ready'
-                        "
-
-                        echo "========================================="
-                        echo "Transferring source code..."
-                        echo "========================================="
-
-                        # Use rsync to transfer source code efficiently
-                        rsync -avz --delete \
-                            --exclude '.git' \
-                            --exclude 'node_modules' \
-                            --exclude 'target' \
-                            --exclude '.gradle' \
-                            --exclude 'build' \
-                            -e "ssh -o StrictHostKeyChecking=no" \
-                            ./ root@${params.SERVER_HOST}:${DEPLOY_PATH}/
-
-                        echo "✓ Source code transferred successfully"
-
-                        # Verify transfer
-                        ssh -o StrictHostKeyChecking=no root@${params.SERVER_HOST} "
-                            echo 'Verifying transferred files...'
-                            ls -la ${DEPLOY_PATH}/ | head -20
-                            if [ -f ${DEPLOY_PATH}/Dockerfile ]; then
-                                echo '✓ Verification passed: Dockerfile found'
-                            else
-                                echo '✗ Verification failed: Dockerfile not found'
-                                exit 1
-                            fi
-                        "
-                    """
-                }
-            }
-        }
-
-        stage('3. Build Docker Image on Server') {
-            steps {
-                echo "Building Docker image on ${params.SERVER_HOST}..."
+                echo "Deploying ${params.BRANCH} to ${params.SERVER_HOST}..."
                 sshagent(credentials: ['tencent-server-ssh']) {
                     sh """
                         ssh -o StrictHostKeyChecking=no root@${params.SERVER_HOST} '
                             set -e
+
                             echo "========================================="
-                            echo "Building Docker image on server..."
+                            echo "Stage 1: Pull Latest Code"
                             echo "========================================="
 
+                            # Create directory if not exists
+                            mkdir -p ${DEPLOY_PATH}
                             cd ${DEPLOY_PATH}
 
-                            # Build Docker image with tag
-                            docker build -t maternity-backend:${BUILD_NUMBER} .
+                            # Clone or pull repository
+                            if [ -d .git ]; then
+                                echo "Repository exists, pulling latest changes..."
+                                git fetch origin
+                                git checkout ${params.BRANCH}
+                                git pull origin ${params.BRANCH}
+                            else
+                                echo "Cloning repository..."
+                                git clone -b ${params.BRANCH} ${GIT_REPO} .
+                            fi
 
-                            # Also tag as latest
+                            # Verify source code
+                            if [ -f Dockerfile ]; then
+                                echo "✓ Source code verified: Dockerfile found"
+                            else
+                                echo "✗ Verification failed: Dockerfile not found"
+                                exit 1
+                            fi
+
+                            echo ""
+                            echo "========================================="
+                            echo "Stage 2: Build Docker Image"
+                            echo "========================================="
+
+                            # Build Docker image
+                            docker build -t maternity-backend:${BUILD_NUMBER} .
                             docker tag maternity-backend:${BUILD_NUMBER} maternity-backend:latest
 
+                            # Verify image was created
                             echo ""
                             echo "Verifying built image..."
                             docker images | grep maternity-backend
 
-                            # Verify image was created successfully
                             if docker images | grep -q "maternity-backend.*${BUILD_NUMBER}"; then
                                 echo "✓ Docker image built successfully!"
                             else
                                 echo "✗ Docker image build failed!"
                                 exit 1
                             fi
-                        '
-                    """
-                }
-            }
-        }
 
-        stage('4. Stop Old Container') {
-            steps {
-                echo "Stopping old container on ${params.SERVER_HOST}..."
-                sshagent(credentials: ['tencent-server-ssh']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no root@${params.SERVER_HOST} '
-                            set -e
+                            echo ""
                             echo "========================================="
-                            echo "Stopping existing containers..."
+                            echo "Stage 3: Stop Old Containers"
                             echo "========================================="
-
-                            cd ${DEPLOY_PATH}
 
                             # Check if containers are running
                             if docker-compose ps | grep -q "Up"; then
@@ -148,33 +100,15 @@ pipeline {
                             else
                                 echo "✓ Old containers stopped successfully"
                             fi
-                        '
-                    """
-                }
-            }
-        }
 
-        stage('5. Start New Container') {
-            steps {
-                echo "Starting new container on ${params.SERVER_HOST}..."
-                sshagent(credentials: ['tencent-server-ssh']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no root@${params.SERVER_HOST} '
-                            set -e
+                            echo ""
                             echo "========================================="
-                            echo "Updating docker-compose configuration..."
+                            echo "Stage 4: Start New Containers"
                             echo "========================================="
-
-                            cd ${DEPLOY_PATH}
 
                             # Update docker-compose.yml to use the new image
                             sed -i "s|maternity-backend:.*|maternity-backend:${BUILD_NUMBER}|g" docker-compose.yml
-
                             echo "Configuration updated to use maternity-backend:${BUILD_NUMBER}"
-
-                            echo "========================================="
-                            echo "Starting new containers..."
-                            echo "========================================="
 
                             # Start containers
                             docker-compose up -d
@@ -195,27 +129,13 @@ pipeline {
                                 docker-compose logs --tail=50
                                 exit 1
                             fi
-                        '
-                    """
-                }
-            }
-        }
 
-        stage('6. Verify Instance Version') {
-            steps {
-                echo 'Verifying application version and health...'
-                sshagent(credentials: ['tencent-server-ssh']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no root@${params.SERVER_HOST} '
-                            set -e
+                            echo ""
                             echo "========================================="
-                            echo "Verifying deployment..."
+                            echo "Stage 5: Health Check"
                             echo "========================================="
-
-                            cd ${DEPLOY_PATH}
 
                             # Check container status
-                            echo ""
                             echo "Container status:"
                             docker-compose ps
 
