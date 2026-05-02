@@ -41,9 +41,17 @@ pipeline {
                             # Clone or pull repository
                             if [ -d .git ]; then
                                 echo "Repository exists, pulling latest changes..."
+
+                                # Clean up any local changes or untracked files that might block pull
+                                echo "Cleaning working directory..."
+                                git reset --hard HEAD
+                                git clean -fd
+
                                 git fetch origin
                                 git checkout ${params.BRANCH}
-                                git pull origin ${params.BRANCH}
+                                git reset --hard origin/${params.BRANCH}
+
+                                echo "✓ Successfully updated to latest code"
                             else
                                 echo "Cloning repository..."
                                 git clone -b ${params.BRANCH} ${GIT_REPO} .
