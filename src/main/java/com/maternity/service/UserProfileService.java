@@ -6,8 +6,10 @@ import com.maternity.dto.UpdateMotherProfileRequest;
 import com.maternity.dto.UserDTO;
 import com.maternity.exception.ResourceNotFoundException;
 import com.maternity.model.MatronProfile;
+import com.maternity.model.MatronOnboardingApplicationStatus;
 import com.maternity.model.MotherProfile;
 import com.maternity.model.User;
+import com.maternity.repository.MatronOnboardingApplicationRepository;
 import com.maternity.repository.MatronProfileRepository;
 import com.maternity.repository.MotherProfileRepository;
 import com.maternity.repository.UserRepository;
@@ -28,15 +30,18 @@ public class UserProfileService {
     private final UserRepository userRepository;
     private final MotherProfileRepository motherProfileRepository;
     private final MatronProfileRepository matronProfileRepository;
+    private final MatronOnboardingApplicationRepository matronOnboardingApplicationRepository;
     private final ObjectMapper objectMapper;
 
     public UserProfileService(UserRepository userRepository,
                              MotherProfileRepository motherProfileRepository,
                              MatronProfileRepository matronProfileRepository,
+                             MatronOnboardingApplicationRepository matronOnboardingApplicationRepository,
                              ObjectMapper objectMapper) {
         this.userRepository = userRepository;
         this.motherProfileRepository = motherProfileRepository;
         this.matronProfileRepository = matronProfileRepository;
+        this.matronOnboardingApplicationRepository = matronOnboardingApplicationRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -93,6 +98,12 @@ public class UserProfileService {
         if (user.getRole() != User.UserRole.MATRON) {
             throw new RuntimeException("User is not a matron");
         }
+
+        matronOnboardingApplicationRepository.findByUserId(userId).ifPresent(application -> {
+            if (application.getStatus() != MatronOnboardingApplicationStatus.APPROVED) {
+                throw new RuntimeException("Matron onboarding application must be approved before updating the public profile");
+            }
+        });
 
         // Find or create matron profile
         MatronProfile profile = matronProfileRepository.findByUserId(userId)
