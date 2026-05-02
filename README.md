@@ -215,6 +215,11 @@ jwt.expiration=86400000
 
 ## Development
 
+### Documentation Standard
+
+- Spec-driven workflow: [`tech/spec-driven-development.md`](tech/spec-driven-development.md)
+- Spec template: [`tech/spec-template.md`](tech/spec-template.md)
+
 ### Running Tests
 
 ```bash
